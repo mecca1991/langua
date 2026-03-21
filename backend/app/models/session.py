@@ -42,4 +42,4 @@ class Session(Base):
         lazy="selectin",
         order_by="TranscriptEntry.turn_index",
     )
-    feedback = relationship("Feedback", back_populates="session", lazy="selectin")
+    feedback = relationship("Feedback", back_populates="session", lazy="selectin", uselist=False)
