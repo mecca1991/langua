@@ -1,11 +1,13 @@
 import uuid
 from datetime import datetime, timezone
 
+from arq.connections import ArqRedis, create_pool, RedisSettings
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_or_create_user
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.session import Session
 from app.models.transcript import TranscriptEntry
@@ -25,6 +27,10 @@ from app.services.errors import STTError, CoachError, TTSError
 router = APIRouter(prefix="/conversation")
 
 MAX_AUDIO_SIZE = 1 * 1024 * 1024  # 1MB
+
+
+async def get_arq_pool() -> ArqRedis:
+    return await create_pool(RedisSettings.from_dsn(settings.redis_url))
 
 
 @router.post("/start", response_model=StartConversationResponse)
@@ -223,6 +229,10 @@ async def end_conversation(
         session.feedback_status = "pending"
 
     await db.commit()
+
+    if session.mode == "quiz":
+        pool = await get_arq_pool()
+        await pool.enqueue_job("generate_feedback", str(request.session_id))
 
     return EndConversationResponse(
         status="ended",
