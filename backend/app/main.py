@@ -6,10 +6,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.auth import get_current_user_payload
+from app.core.logging import setup_logging
+from app.core.middleware import RequestIDMiddleware
 from app.schemas.auth import JWTPayload
 from app.api.topics import router as topics_router
 from app.api.conversation import router as conversation_router
 from app.api.sessions import router as sessions_router
+
+setup_logging()
 
 app = FastAPI(title="Langua API", version="0.1.0")
 
@@ -24,6 +28,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(RequestIDMiddleware)
 
 
 app.include_router(topics_router)
