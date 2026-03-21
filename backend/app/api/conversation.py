@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from sqlalchemy import select
@@ -10,6 +11,8 @@ from app.models.session import Session
 from app.models.transcript import TranscriptEntry
 from app.models.user import User
 from app.schemas.conversation import (
+    EndConversationRequest,
+    EndConversationResponse,
     StartConversationRequest,
     StartConversationResponse,
     TurnResponse,
@@ -191,4 +194,37 @@ async def conversation_turn(
             turn_index=assistant_turn_index,
         ),
         audio_url=f"/audio/{turn_id}.mp3",
+    )
+
+
+@router.post("/end", response_model=EndConversationResponse)
+async def end_conversation(
+    request: EndConversationRequest,
+    user: User = Depends(get_or_create_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Session).where(Session.id == request.session_id))
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your session")
+
+    if session.status == "ended":
+        return EndConversationResponse(
+            status="ended",
+            feedback_status=session.feedback_status,
+        )
+
+    session.status = "ended"
+    session.ended_at = datetime.now(timezone.utc)
+
+    if session.mode == "quiz":
+        session.feedback_status = "pending"
+
+    await db.commit()
+
+    return EndConversationResponse(
+        status="ended",
+        feedback_status=session.feedback_status,
     )
