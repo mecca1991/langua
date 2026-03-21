@@ -29,7 +29,7 @@ class OpenAITTSService:
     def _get_client(self) -> AsyncOpenAI:
         return AsyncOpenAI(api_key=self._api_key, timeout=self._timeout)
 
-    async def synthesize(self, text: str, language: str, turn_id: uuid.UUID) -> Path:
+    async def synthesize(self, text: str, _language: str, turn_id: uuid.UUID) -> Path:
         client = self._get_client()
         output_path = self._audio_dir / f"{turn_id}.mp3"
         last_error: Exception | None = None
@@ -42,7 +42,7 @@ class OpenAITTSService:
                     input=text,
                     response_format="mp3",
                 )
-                await response.stream_to_file(str(output_path))
+                await response.stream_to_file(str(output_path))  # pyright: ignore[reportDeprecated]
                 return output_path
 
             except (APIStatusError, APITimeoutError, asyncio.TimeoutError) as e:

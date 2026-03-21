@@ -18,7 +18,7 @@ class WhisperSTTService:
     def _get_client(self) -> AsyncOpenAI:
         return AsyncOpenAI(api_key=self._api_key, timeout=self._timeout)
 
-    async def transcribe(self, audio_data: bytes, language: str) -> str:
+    async def transcribe(self, audio_data: bytes, _language: str) -> str:
         client = self._get_client()
         last_error: Exception | None = None
 
