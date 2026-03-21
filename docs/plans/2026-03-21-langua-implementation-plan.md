@@ -6,6 +6,8 @@
 
 **Architecture:** Next.js 14 (App Router) frontend communicates with a FastAPI backend over REST and WebSocket. The backend orchestrates OpenAI Whisper (STT), Claude AI (coaching), and OpenAI TTS in a streaming loop, with Redis for WebSocket session resilience and PostgreSQL for persistence.
 
+> **v1 Pronunciation Evaluation Model:** This app does NOT perform acoustic/phoneme-level pronunciation scoring. There is no dedicated pronunciation grading service. Instead, v1 uses **transcript similarity**: Whisper converts the user's speech to text, and Claude compares that transcribed text against the target phrase (Romaji/Kanji). If Whisper heard something close to the target, the user probably said it correctly; if not, Claude prompts a retry. This means feedback is text-match-based ("you said X, the target is Y") — not phoneme-level grading. True pronunciation scoring (e.g. Azure Pronunciation Assessment, Speechace) is explicitly out of scope for v1.
+
 **Tech Stack:** Next.js 14, TypeScript, Tailwind CSS, NextAuth.js v5, FastAPI, SQLAlchemy 2.0 async, Alembic, asyncpg, Redis, PostgreSQL, OpenAI Whisper API, Anthropic Claude API, OpenAI TTS API, python-jose, pytest, httpx, Jest, React Testing Library.
 
 ---
@@ -1672,12 +1674,21 @@ import anthropic
 
 from app.config import settings
 
-SYSTEM_PROMPT = """You are Langua, a Japanese language coach. Your role is to:
-1. Understand what the user wants to say in English
-2. Teach them the correct Japanese phrase in three forms: Kanji, Hiragana, and Romaji
-3. Guide pronunciation step by step
-4. Ask them to repeat
-5. Confirm correctness or correct gently
+SYSTEM_PROMPT = """You are Langua, a Japanese language coach.
+
+IMPORTANT — HOW PRONUNCIATION EVALUATION WORKS IN THIS APP:
+You do NOT hear the user's audio. You receive TEXT transcribed by OpenAI Whisper.
+Pronunciation feedback is based on transcript similarity, not acoustic analysis.
+- If what Whisper transcribed closely matches the target Romaji or Kanji, treat it as a correct attempt.
+- If it does not match, assume the pronunciation was off and prompt a retry with the specific difference.
+- Never claim to have "heard" the user. Say "it looks like you said..." not "I heard you say..."
+
+YOUR ROLE:
+1. Understand what the user wants to express in English
+2. Teach the correct Japanese phrase in three forms: Kanji, Hiragana, and Romaji
+3. Ask the user to try saying it aloud
+4. When their attempt comes back (as Whisper text), compare it to the target Romaji
+5. If it matches closely: confirm and move on. If not: show the difference and ask them to retry.
 
 In quiz mode, also track which phrases the user struggled with and provide
 a structured feedback summary when asked. Format: JSON with keys "correct",
@@ -1837,7 +1848,12 @@ async def conversation_stream(
 
             audio_bytes: bytes = message["bytes"]
 
-            # 1. STT
+            # 1. STT — Whisper returns text of what it heard.
+            # NOTE: This is transcript-based pronunciation evaluation.
+            # Claude will receive this text and compare it against the target
+            # phrase it previously taught. "Pronunciation correct" = Whisper
+            # transcribed something close to the target Romaji/Kanji.
+            # There is no acoustic/phoneme scoring in v1.
             user_text = await _transcribe(audio_bytes)
             transcript.append({"role": "user", "text_en": user_text})
 
