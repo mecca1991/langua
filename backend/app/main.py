@@ -5,13 +5,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
+from app.core.api_errors import APIError
 from app.core.auth import get_current_user_payload
+from app.core.exception_handlers import (
+    ai_service_error_handler,
+    api_error_handler,
+    conflict_handler,
+    forbidden_handler,
+    not_found_handler,
+    unhandled_exception_handler,
+)
 from app.core.logging import setup_logging
 from app.core.middleware import RequestIDMiddleware
 from app.schemas.auth import JWTPayload
 from app.api.topics import router as topics_router
 from app.api.conversation import router as conversation_router
 from app.api.sessions import router as sessions_router
+from app.services.domain_errors import ConflictError, ForbiddenError, NotFoundError
+from app.services.errors import AIServiceError
 
 setup_logging()
 
@@ -30,6 +41,13 @@ app.add_middleware(
 )
 
 app.add_middleware(RequestIDMiddleware)
+
+app.add_exception_handler(APIError, api_error_handler)
+app.add_exception_handler(NotFoundError, not_found_handler)
+app.add_exception_handler(ForbiddenError, forbidden_handler)
+app.add_exception_handler(ConflictError, conflict_handler)
+app.add_exception_handler(AIServiceError, ai_service_error_handler)
+app.add_exception_handler(Exception, unhandled_exception_handler)
 
 
 app.include_router(topics_router)

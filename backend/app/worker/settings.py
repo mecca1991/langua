@@ -10,6 +10,6 @@ async def generate_feedback(ctx: dict, session_id: str) -> None:
 
 class WorkerSettings:
     functions = [generate_feedback]
-    redis_settings = RedisSettings.from_dsn(settings.redis_url)
+    redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
     max_jobs = settings.worker_concurrency
     job_timeout = 120

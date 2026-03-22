@@ -1,18 +1,25 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!loading && !user) {
-      router.replace("/sign-in");
+      const search = window.location.search;
+      const fullPath = pathname + search;
+      const signInUrl =
+        fullPath && fullPath !== "/"
+          ? `/sign-in?returnTo=${encodeURIComponent(fullPath)}`
+          : "/sign-in";
+      router.replace(signInUrl);
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, pathname]);
 
   if (loading) {
     return (

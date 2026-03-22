@@ -1,39 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api";
-
-interface SessionSummary {
-  id: string;
-  language: string;
-  mode: string;
-  topic: string;
-  status: string;
-  feedback_status: string | null;
-  started_at: string;
-  ended_at: string | null;
-}
+import { useApiQuery } from "@/hooks/useApiQuery";
+import type { SessionSummary, SessionListResponse } from "@/lib/api-types";
 
 export default function SessionsPage() {
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  useEffect(() => {
-    const fetchSessions = async () => {
-      try {
-        const response = await apiClient.get("/sessions");
-        const data = await response.json();
-        setSessions(data.sessions);
-      } catch (error) {
-        console.error("Failed to fetch sessions:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchSessions();
-  }, []);
+  const { data, loading, error } = useApiQuery(
+    () => apiClient.get<SessionListResponse>("/sessions"),
+    [],
+  );
+
+  const sessions: SessionSummary[] = data?.sessions ?? [];
 
   if (loading) {
     return (
@@ -41,6 +21,27 @@ export default function SessionsPage() {
         <p className="text-gray-500">Loading sessions...</p>
       </div>
     );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
+        <p className="text-red-600">{error}</p>
+        <button
+          onClick={() => router.push("/")}
+          className="text-sm text-blue-600 hover:text-blue-700"
+        >
+          Back to Home
+        </button>
+      </div>
+    );
+  }
+
+  function sessionHref(session: SessionSummary): string {
+    if (session.status === "active") {
+      return `/conversation/${session.id}`;
+    }
+    return `/sessions/${session.id}`;
   }
 
   return (
@@ -56,13 +57,21 @@ export default function SessionsPage() {
       </div>
 
       {sessions.length === 0 ? (
-        <p className="text-gray-500">No sessions yet. Start your first conversation!</p>
+        <div className="flex flex-col items-center gap-3 py-12">
+          <p className="text-gray-500">No sessions yet.</p>
+          <button
+            onClick={() => router.push("/")}
+            className="rounded-lg bg-green-600 px-6 py-2 text-sm font-medium text-white shadow-md hover:bg-green-700"
+          >
+            Start your first conversation
+          </button>
+        </div>
       ) : (
         <div className="flex flex-col gap-3">
           {sessions.map((session) => (
             <button
               key={session.id}
-              onClick={() => router.push(`/sessions/${session.id}`)}
+              onClick={() => router.push(sessionHref(session))}
               className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm hover:border-blue-300 hover:shadow-md transition"
             >
               <div>
@@ -80,7 +89,7 @@ export default function SessionsPage() {
                       : "bg-gray-100 text-gray-600"
                   }`}
                 >
-                  {session.status}
+                  {session.status === "active" ? "Active" : "Ended"}
                 </span>
                 {session.feedback_status === "ready" && (
                   <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">

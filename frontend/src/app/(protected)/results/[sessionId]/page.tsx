@@ -1,82 +1,158 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { apiClient } from "@/lib/api";
-import { FeedbackCard, FeedbackData } from "@/components/FeedbackCard";
+import { apiClient, ApiError } from "@/lib/api";
+import { FeedbackCard } from "@/components/FeedbackCard";
+import type {
+  FeedbackStatusResponse,
+  SessionDetail,
+  SessionFeedback,
+} from "@/lib/api-types";
 
-type FeedbackStatus = "pending" | "ready" | "failed" | null;
+type PageStatus =
+  | "loading"
+  | "error"
+  | "no_feedback"
+  | "pending"
+  | "ready"
+  | "failed"
+  | "retrying";
+
+const POLL_INTERVAL_MS = 3000;
 
 export default function ResultsPage() {
   const params = useParams();
   const router = useRouter();
   const sessionId = params.sessionId as string;
 
-  const [feedbackStatus, setFeedbackStatus] = useState<FeedbackStatus>("pending");
-  const [feedback, setFeedback] = useState<FeedbackData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [retrying, setRetrying] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [status, setStatus] = useState<PageStatus>("loading");
+  const [feedback, setFeedback] = useState<SessionFeedback | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const poll = async () => {
+  const stopPolling = useCallback(() => {
+    if (pollerRef.current) {
+      clearInterval(pollerRef.current);
+      pollerRef.current = null;
+    }
+  }, []);
+
+  const pollOnce = useCallback(async (): Promise<boolean> => {
+    const data = await apiClient.get<FeedbackStatusResponse>(
+      `/sessions/${sessionId}/feedback-status`,
+    );
+
+    if (data.feedback_status === "ready") {
+      const session = await apiClient.get<SessionDetail>(
+        `/sessions/${sessionId}`,
+      );
+      if (session.feedback && session.feedback.length > 0) {
+        setFeedback(session.feedback[0]);
+        setStatus("ready");
+      } else {
+        setErrorMsg("Feedback was marked as ready but no data was returned.");
+        setStatus("error");
+      }
+      return true;
+    }
+
+    if (data.feedback_status === "failed") {
+      setStatus("failed");
+      return true;
+    }
+
+    return false;
+  }, [sessionId]);
+
+  const startPolling = useCallback(() => {
+    stopPolling();
+    pollerRef.current = setInterval(async () => {
       try {
-        const response = await apiClient.get(
-          `/sessions/${sessionId}/feedback-status`,
-        );
-        const data = await response.json();
-        setFeedbackStatus(data.feedback_status);
-
-        if (data.feedback_status === "ready") {
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          const sessionResponse = await apiClient.get(`/sessions/${sessionId}`);
-          const sessionData = await sessionResponse.json();
-          if (sessionData.feedback) {
-            setFeedback(sessionData.feedback);
-          }
-        } else if (data.feedback_status === "failed") {
-          if (intervalRef.current) clearInterval(intervalRef.current);
-        }
+        const done = await pollOnce();
+        if (done) stopPolling();
       } catch {
-        setError("Failed to check feedback status");
+        stopPolling();
+        setErrorMsg("Lost connection while checking feedback status.");
+        setStatus("error");
+      }
+    }, POLL_INTERVAL_MS);
+  }, [pollOnce, stopPolling]);
+
+  // --- Load session on mount ---
+  useEffect(() => {
+    const loadSession = async () => {
+      try {
+        const session = await apiClient.get<SessionDetail>(
+          `/sessions/${sessionId}`,
+        );
+
+        if (session.feedback_status === "ready") {
+          if (session.feedback && session.feedback.length > 0) {
+            setFeedback(session.feedback[0]);
+            setStatus("ready");
+          } else {
+            setErrorMsg(
+              "Feedback was marked as ready but no data was returned.",
+            );
+            setStatus("error");
+          }
+          return;
+        }
+
+        if (session.feedback_status === "pending") {
+          setStatus("pending");
+          startPolling();
+          return;
+        }
+
+        if (session.feedback_status === "failed") {
+          setStatus("failed");
+          return;
+        }
+
+        // null or unexpected value — no feedback for this session
+        setStatus("no_feedback");
+      } catch (err) {
+        if (err instanceof ApiError) {
+          if (err.status === 404) {
+            setErrorMsg("Session not found.");
+          } else if (err.status === 403) {
+            setErrorMsg("You do not have access to this session.");
+          } else {
+            setErrorMsg(err.message);
+          }
+        } else {
+          setErrorMsg(
+            err instanceof Error ? err.message : "Failed to load session",
+          );
+        }
+        setStatus("error");
       }
     };
 
-    poll();
-    intervalRef.current = setInterval(poll, 3000);
+    loadSession();
+    return stopPolling;
+  }, [sessionId, startPolling, stopPolling]);
 
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [sessionId]);
-
+  // --- Retry ---
+  const retryingRef = useRef(false);
   const handleRetry = async () => {
-    setRetrying(true);
-    setError(null);
+    if (retryingRef.current) return;
+    retryingRef.current = true;
+    setStatus("retrying");
+    setErrorMsg(null);
     try {
-      await apiClient.post(`/sessions/${sessionId}/retry-feedback`);
-      setFeedbackStatus("pending");
-      intervalRef.current = setInterval(async () => {
-        const response = await apiClient.get(
-          `/sessions/${sessionId}/feedback-status`,
-        );
-        const data = await response.json();
-        setFeedbackStatus(data.feedback_status);
-        if (data.feedback_status === "ready" || data.feedback_status === "failed") {
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          if (data.feedback_status === "ready") {
-            const sessionResponse = await apiClient.get(`/sessions/${sessionId}`);
-            const sessionData = await sessionResponse.json();
-            if (sessionData.feedback) {
-              setFeedback(sessionData.feedback);
-            }
-          }
-        }
-      }, 3000);
-    } catch {
-      setError("Failed to retry");
-    } finally {
-      setRetrying(false);
+      await apiClient.post<{ status: string }>(
+        `/sessions/${sessionId}/retry-feedback`,
+      );
+      retryingRef.current = false;
+      setStatus("pending");
+      startPolling();
+    } catch (err) {
+      retryingRef.current = false;
+      setErrorMsg(err instanceof Error ? err.message : "Failed to retry");
+      setStatus("failed");
     }
   };
 
@@ -84,31 +160,49 @@ export default function ResultsPage() {
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
       <h1 className="text-2xl font-bold">Quiz Results</h1>
 
-      {feedbackStatus === "pending" && (
+      {status === "loading" && (
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-          <p className="text-gray-500">Processing your results...</p>
+          <p className="text-gray-500">Loading...</p>
         </div>
       )}
 
-      {feedbackStatus === "ready" && feedback && (
-        <FeedbackCard feedback={feedback} />
+      {(status === "pending" || status === "retrying") && (
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+          <p className="text-gray-500">
+            {status === "retrying"
+              ? "Retrying feedback generation..."
+              : "Processing your results..."}
+          </p>
+        </div>
       )}
 
-      {feedbackStatus === "failed" && (
+      {status === "ready" && feedback && <FeedbackCard feedback={feedback} />}
+
+      {status === "failed" && (
         <div className="flex flex-col items-center gap-3">
           <p className="text-red-500">
             Failed to generate feedback. Please try again.
           </p>
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {errorMsg && <p className="text-sm text-red-400">{errorMsg}</p>}
           <button
             onClick={handleRetry}
-            disabled={retrying}
-            className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
-            {retrying ? "Retrying..." : "Retry"}
+            Retry
           </button>
         </div>
+      )}
+
+      {status === "error" && (
+        <p className="text-red-600">{errorMsg ?? "An error occurred."}</p>
+      )}
+
+      {status === "no_feedback" && (
+        <p className="text-gray-500">
+          No feedback is available for this session.
+        </p>
       )}
 
       <button

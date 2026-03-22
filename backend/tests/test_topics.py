@@ -32,8 +32,8 @@ async def client(monkeypatch):
     monkeypatch.setenv("SUPABASE_PROJECT_URL", "https://test.supabase.co")
     from app.core.config import Settings
     test_settings = Settings(
-        supabase_jwt_secret=TEST_SECRET,
-        supabase_project_url="https://test.supabase.co",
+        SUPABASE_JWT_SECRET=TEST_SECRET,
+        SUPABASE_PROJECT_URL="https://test.supabase.co",
     )
     monkeypatch.setattr("app.core.auth.settings", test_settings)
     transport = ASGITransport(app=app)

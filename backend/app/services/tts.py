@@ -42,7 +42,7 @@ class OpenAITTSService:
                     input=text,
                     response_format="mp3",
                 )
-                await response.stream_to_file(str(output_path))  # pyright: ignore[reportDeprecated]
+                response.stream_to_file(str(output_path))  # pyright: ignore[reportDeprecated]
                 return output_path
 
             except (APIStatusError, APITimeoutError, asyncio.TimeoutError) as e:

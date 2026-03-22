@@ -72,9 +72,9 @@ async def client(monkeypatch, engine, session_factory):
     monkeypatch.setenv("SUPABASE_PROJECT_URL", "https://test.supabase.co")
     from app.core.config import Settings
     test_settings = Settings(
-        supabase_jwt_secret=TEST_SECRET,
-        supabase_project_url="https://test.supabase.co",
-        database_url=TEST_DATABASE_URL,
+        SUPABASE_JWT_SECRET=TEST_SECRET,
+        SUPABASE_PROJECT_URL="https://test.supabase.co",
+        DATABASE_URL=TEST_DATABASE_URL,
     )
     monkeypatch.setattr("app.core.auth.settings", test_settings)
     monkeypatch.setattr("app.core.database.engine", engine)

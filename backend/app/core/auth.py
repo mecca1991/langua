@@ -1,17 +1,80 @@
+import logging
+import time
 import uuid
+from typing import Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+import httpx
 from jose import JWTError, jwt
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.api_errors import AuthenticationError
 from app.core.config import settings
-from app.core.database import get_db
-from app.models.user import User
 from app.schemas.auth import JWTPayload
 
 security = HTTPBearer()
+logger = logging.getLogger(__name__)
+ASYMMETRIC_ALGORITHMS = {"RS256", "ES256"}
+JWKS_CACHE_TTL_SECONDS = 300
+_jwks_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
+async def _fetch_jwks(issuer: str) -> list[dict[str, Any]]:
+    cached = _jwks_cache.get(issuer)
+    now = time.time()
+    if cached and now - cached[0] < JWKS_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    jwks_url = f"{issuer.rstrip('/')}/.well-known/jwks.json"
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.get(jwks_url)
+        response.raise_for_status()
+
+    keys = response.json().get("keys", [])
+    _jwks_cache[issuer] = (now, keys)
+    return keys
+
+
+def _resolve_jwk(keys: list[dict[str, Any]], kid: str | None) -> dict[str, Any]:
+    if not kid:
+        raise JWTError("Missing key id in token header")
+
+    for key in keys:
+        if key.get("kid") == kid:
+            return key
+
+    raise JWTError("Signing key not found for token")
+
+
+async def _decode_supabase_jwt(token: str) -> dict[str, Any]:
+    header = jwt.get_unverified_header(token)
+    algorithm = header.get("alg")
+
+    if algorithm == "HS256":
+        return jwt.decode(
+            token,
+            settings.SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+
+    if algorithm in ASYMMETRIC_ALGORITHMS:
+        claims = jwt.get_unverified_claims(token)
+        issuer = claims.get("iss")
+        if not issuer:
+            raise JWTError("Missing issuer in token claims")
+
+        keys = await _fetch_jwks(issuer)
+        signing_key = _resolve_jwk(keys, header.get("kid"))
+        return jwt.decode(
+            token,
+            signing_key,
+            algorithms=[algorithm],
+            audience="authenticated",
+            issuer=issuer,
+        )
+
+    raise JWTError(f"Unsupported JWT algorithm: {algorithm}")
 
 
 async def get_current_user_payload(
@@ -19,16 +82,12 @@ async def get_current_user_payload(
 ) -> JWTPayload:
     token = credentials.credentials
     try:
-        payload = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+        payload = await _decode_supabase_jwt(token)
+    except (JWTError, httpx.HTTPError) as exc:
+        logger.error("jwt_validation_failed detail=%s", str(exc))
+        raise AuthenticationError(
+            error_code="INVALID_AUTH",
+            error_message="The authentication token is missing, invalid, or expired.",
         )
 
     user_metadata = payload.get("user_metadata", {})
@@ -38,24 +97,3 @@ async def get_current_user_payload(
         name=user_metadata.get("full_name", ""),
         avatar_url=user_metadata.get("avatar_url"),
     )
-
-
-async def get_or_create_user(
-    payload: JWTPayload = Depends(get_current_user_payload),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    result = await db.execute(select(User).where(User.id == payload.sub))
-    user = result.scalar_one_or_none()
-
-    if user is None:
-        user = User(
-            id=payload.sub,
-            email=payload.email,
-            name=payload.name,
-            avatar_url=payload.avatar_url,
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-
-    return user

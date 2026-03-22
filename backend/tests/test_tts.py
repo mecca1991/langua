@@ -17,8 +17,10 @@ def tts_service(tmp_path):
 async def test_tts_synthesize_success(tts_service, tmp_path):
     turn_id = uuid.uuid4()
 
-    mock_response = AsyncMock()
-    mock_response.stream_to_file = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.stream_to_file.side_effect = (
+        lambda path: Path(path).write_bytes(b"fake-audio")
+    )
 
     mock_client = AsyncMock()
     mock_client.audio.speech.create = AsyncMock(return_value=mock_response)
@@ -39,8 +41,10 @@ async def test_tts_retries_on_server_error(tts_service, tmp_path):
     mock_resp_err.status_code = 500
     mock_resp_err.headers = {}
 
-    mock_response = AsyncMock()
-    mock_response.stream_to_file = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.stream_to_file.side_effect = (
+        lambda path: Path(path).write_bytes(b"fake-audio")
+    )
 
     mock_client = AsyncMock()
     mock_client.audio.speech.create = AsyncMock(
@@ -52,6 +56,9 @@ async def test_tts_retries_on_server_error(tts_service, tmp_path):
 
     with patch.object(tts_service, "_get_client", return_value=mock_client):
         result = await tts_service.synthesize("こんにちは", "ja", turn_id)
+        expected_path = tmp_path / f"{turn_id}.mp3"
+        assert result == expected_path
+        assert expected_path.read_bytes() == b"fake-audio"
         assert mock_client.audio.speech.create.call_count == 2
 
 
