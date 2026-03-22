@@ -135,6 +135,10 @@ celerybeat.pid
 
 # Environments
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 .envrc
 .venv
 env/
@@ -189,6 +193,20 @@ cython_debug/
 
 # Ruff stuff:
 .ruff_cache/
+
+# Frontend / Node
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+.turbo/
+.vercel/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
 
 # PyPI configuration file
 .pypirc
