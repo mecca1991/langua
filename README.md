@@ -95,4 +95,4 @@ cd backend && pytest
 
 Working end-to-end: auth, voice loop, session management, transcript history, quiz feedback with polling and retry.
 
-## **Next up:** expanded language support, deployment story, learning analytics.
+**Next up:** expanded language support, deployment story, learning analytics.
